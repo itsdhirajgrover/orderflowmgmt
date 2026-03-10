@@ -1,0 +1,13 @@
+{
+  "name": "orderflow-mgmt",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "cd frontend && npm start",
+    "start:backend": "cd backend && python -m uvicorn app.main:app --reload",
+    "install:frontend": "cd frontend && npm install",
+    "install:backend": "cd backend && pip install -r requirements.txt"
+  },
+  "dependencies": {
+    "react-scripts": "^5.0.1"
+  }
+}

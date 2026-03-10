@@ -1,0 +1,9 @@
+# Backend requirements
+fastapi
+uvicorn
+sqlalchemy
+pymysql
+python-dotenv
+passlib[bcrypt]
+pyjwt
+requests
