@@ -87,6 +87,12 @@ class OrderResponse(BaseModel):
     created_by_id: int
     created_by_name: Optional[str]
     assigned_to_id: Optional[int]
+    parent_order_id: Optional[int]
+    parent_order_number: Optional[str]
+    split_notes: Optional[str]
+    child_orders: Optional[List[dict]]
+    total_collected: float
+    payment_installments: Optional[List[dict]]
 
 
 def calc_line_totals(item):
@@ -120,6 +126,8 @@ def order_to_response(o) -> OrderResponse:
     total_tax = sum(li.tax_amount or 0 for li in (o.line_items or []))
     total_discount = sum(li.discount_amount or 0 for li in (o.line_items or []))
     grand_total = sum(li.line_total or 0 for li in (o.line_items or []))
+    installments = o.payment_installments or []
+    total_collected = sum(p.amount for p in installments)
 
     return OrderResponse(
         id=o.id,
@@ -153,6 +161,19 @@ def order_to_response(o) -> OrderResponse:
         created_by_id=o.created_by_id,
         created_by_name=o.created_by.full_name if o.created_by else None,
         assigned_to_id=o.assigned_to_id,
+        parent_order_id=o.parent_order_id,
+        parent_order_number=o.parent_order.order_number if o.parent_order else None,
+        split_notes=o.split_notes,
+        child_orders=[
+            {"id": c.id, "order_number": c.order_number, "status": c.status.value if c.status else None}
+            for c in (o.child_orders or [])
+        ],
+        total_collected=round(total_collected, 2),
+        payment_installments=[
+            {"id": p.id, "month": p.month, "amount": p.amount, "notes": p.notes,
+             "collected_by_name": p.collected_by.full_name if p.collected_by else None}
+            for p in installments
+        ],
     )
 
 
@@ -173,6 +194,8 @@ def create_order(
     token: str = Depends(auth.oauth2_scheme),
 ):
     user = get_current_user(db, token)
+    if user.role not in (models.UserRole.MANAGER, models.UserRole.SALES_REP):
+        raise HTTPException(status_code=403, detail="Only managers and sales reps can create orders")
 
     customer = db.query(customer_models.Customer).filter(customer_models.Customer.id == order.customer_id).first()
     if not customer:
@@ -226,6 +249,7 @@ def list_orders(
         joinedload(order_models.Order.customer),
         joinedload(order_models.Order.line_items),
         joinedload(order_models.Order.created_by),
+        joinedload(order_models.Order.payment_installments),
     )
 
     # Role-based visibility
@@ -276,18 +300,25 @@ def get_order(
     db: Session = Depends(auth.get_db),
     token: str = Depends(auth.oauth2_scheme),
 ):
+    user = get_current_user(db, token)
     order = (
         db.query(order_models.Order)
         .options(
             joinedload(order_models.Order.customer),
             joinedload(order_models.Order.line_items),
             joinedload(order_models.Order.created_by),
+            joinedload(order_models.Order.payment_installments),
         )
         .filter(order_models.Order.id == order_id)
         .first()
     )
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    # Role-based visibility: sales reps can only view their own orders
+    if user.role == models.UserRole.SALES_REP and order.created_by_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to view this order")
+
     return order_to_response(order)
 
 
@@ -462,6 +493,127 @@ def dispatch_order(
     return order_to_response(db_order)
 
 
+# --- Split Order ---
+
+class SplitLineItem(BaseModel):
+    line_item_id: int
+    ship_quantity: float  # quantity to ship now (stays on original order)
+
+
+class SplitOrderRequest(BaseModel):
+    line_items: List[SplitLineItem]
+    split_notes: Optional[str] = None
+
+
+@order_router.post("/{order_id}/split", response_model=OrderResponse)
+def split_order(
+    order_id: int,
+    data: SplitOrderRequest,
+    db: Session = Depends(auth.get_db),
+    token: str = Depends(auth.oauth2_scheme),
+):
+    """Split an order: ship available quantity now, create a new order for the remainder."""
+    user = get_current_user(db, token)
+    if user.role not in (models.UserRole.BILLING_EXEC, models.UserRole.DISPATCH_AGENT, models.UserRole.MANAGER):
+        raise HTTPException(status_code=403, detail="Not authorized to split orders")
+
+    db_order = (
+        db.query(order_models.Order)
+        .options(
+            joinedload(order_models.Order.customer),
+            joinedload(order_models.Order.line_items),
+            joinedload(order_models.Order.created_by),
+        )
+        .filter(order_models.Order.id == order_id)
+        .first()
+    )
+    if not db_order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if db_order.status not in (
+        order_models.OrderStatus.PENDING_BILLING,
+        order_models.OrderStatus.BILLED,
+    ):
+        raise HTTPException(status_code=400, detail="Order can only be split during the billing phase")
+
+    # Build lookup of adjustments
+    adjustments = {item.line_item_id: item.ship_quantity for item in data.line_items}
+
+    # Validate adjustments and collect remainder line items
+    remainder_items = []
+    for li in db_order.line_items:
+        if li.id not in adjustments:
+            continue
+        ship_qty = adjustments[li.id]
+        if ship_qty < 0:
+            raise HTTPException(status_code=400, detail=f"Ship quantity cannot be negative for {li.sku_name}")
+        if ship_qty >= li.quantity:
+            raise HTTPException(status_code=400, detail=f"Ship quantity must be less than total quantity for {li.sku_name}")
+        remainder_qty = li.quantity - ship_qty
+        if remainder_qty > 0:
+            remainder_items.append((li, ship_qty, remainder_qty))
+
+    if not remainder_items:
+        raise HTTPException(status_code=400, detail="No items to split. Specify at least one line item with a reduced ship quantity.")
+
+    # Create the new (backorder) child order
+    child_order = order_models.Order(
+        order_number=generate_order_number(),
+        customer_id=db_order.customer_id,
+        priority=db_order.priority,
+        internal_notes=f"Split from {db_order.order_number}. {data.split_notes or ''}".strip(),
+        created_by_id=user.id,
+        parent_order_id=db_order.id,
+        split_notes=data.split_notes,
+        status=order_models.OrderStatus.PENDING_BILLING,
+    )
+    db.add(child_order)
+    db.flush()
+
+    # Update original order line items and create remainder line items on child
+    for li, ship_qty, remainder_qty in remainder_items:
+        # Reduce original line item quantity
+        li.quantity = ship_qty
+        tax, total = calc_line_totals_from_values(ship_qty, li.unit_price, li.gst_rate, li.discount_amount * (ship_qty / (ship_qty + remainder_qty)))
+        li.tax_amount = round(tax, 2)
+        li.discount_amount = round(li.discount_amount * (ship_qty / (ship_qty + remainder_qty)), 2)
+        li.line_total = round(total, 2)
+        if li.billed_quantity is not None:
+            li.billed_quantity = min(li.billed_quantity, ship_qty)
+
+        # Create remainder line item on child order
+        remainder_discount = li.discount_amount * (remainder_qty / ship_qty) if ship_qty > 0 else 0
+        r_tax, r_total = calc_line_totals_from_values(remainder_qty, li.unit_price, li.gst_rate, remainder_discount)
+        child_li = order_models.OrderLineItem(
+            order_id=child_order.id,
+            sku_id=li.sku_id,
+            sku_code=li.sku_code,
+            sku_name=li.sku_name,
+            quantity=remainder_qty,
+            unit=li.unit,
+            unit_price=li.unit_price,
+            gst_rate=li.gst_rate,
+            tax_amount=round(r_tax, 2),
+            discount_amount=round(remainder_discount, 2),
+            line_total=round(r_total, 2),
+            notes=f"Remainder from {db_order.order_number}",
+        )
+        db.add(child_li)
+
+    db_order.split_notes = data.split_notes or "Split: partial shipment, remainder in new order"
+
+    db.commit()
+    db.refresh(db_order)
+    return order_to_response(db_order)
+
+
+def calc_line_totals_from_values(quantity, unit_price, gst_rate, discount_amount):
+    """Calculate tax and line total from raw values."""
+    base = quantity * unit_price
+    tax = base * (gst_rate / 100.0)
+    return tax, base + tax - discount_amount
+
+
 @order_router.post("/{order_id}/close", response_model=OrderResponse)
 def close_order(
     order_id: int,
@@ -553,6 +705,168 @@ def reverse_collection(
     db.commit()
     db.refresh(db_order)
     return order_to_response(db_order)
+
+
+# --- Payment Installments ---
+
+class PaymentInstallmentCreate(BaseModel):
+    month: str  # "YYYY-MM"
+    amount: float
+    notes: Optional[str] = None
+
+
+class PaymentInstallmentResponse(BaseModel):
+    id: int
+    order_id: int
+    month: str
+    amount: float
+    notes: Optional[str]
+    collected_by_id: Optional[int]
+    collected_by_name: Optional[str]
+    created_at: str
+
+
+class PaymentInstallmentBulkSave(BaseModel):
+    installments: List[PaymentInstallmentCreate]
+
+
+@order_router.get("/{order_id}/payments", response_model=List[PaymentInstallmentResponse])
+def get_payments(
+    order_id: int,
+    db: Session = Depends(auth.get_db),
+    token: str = Depends(auth.oauth2_scheme),
+):
+    user = get_current_user(db, token)
+    db_order = db.query(order_models.Order).filter(order_models.Order.id == order_id).first()
+    if not db_order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    installments = (
+        db.query(order_models.PaymentInstallment)
+        .filter(order_models.PaymentInstallment.order_id == order_id)
+        .order_by(order_models.PaymentInstallment.month)
+        .all()
+    )
+    return [
+        PaymentInstallmentResponse(
+            id=p.id, order_id=p.order_id, month=p.month, amount=p.amount, notes=p.notes,
+            collected_by_id=p.collected_by_id,
+            collected_by_name=p.collected_by.full_name if p.collected_by else None,
+            created_at=str(p.created_at),
+        )
+        for p in installments
+    ]
+
+
+@order_router.post("/{order_id}/payments", response_model=List[PaymentInstallmentResponse])
+def save_payments(
+    order_id: int,
+    data: PaymentInstallmentBulkSave,
+    db: Session = Depends(auth.get_db),
+    token: str = Depends(auth.oauth2_scheme),
+):
+    """Bulk upsert payment installments for an order. Replaces all installments for given months."""
+    user = get_current_user(db, token)
+    if user.role not in (models.UserRole.COLLECTION_EXEC, models.UserRole.MANAGER):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    db_order = (
+        db.query(order_models.Order)
+        .options(joinedload(order_models.Order.customer), joinedload(order_models.Order.line_items))
+        .filter(order_models.Order.id == order_id)
+        .first()
+    )
+    if not db_order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if db_order.status not in (order_models.OrderStatus.CLOSED, order_models.OrderStatus.COLLECTED):
+        raise HTTPException(status_code=400, detail="Payments can only be recorded for closed/collected orders")
+
+    # Delete existing installments for the given months and re-insert
+    incoming_months = {inst.month for inst in data.installments}
+    db.query(order_models.PaymentInstallment).filter(
+        order_models.PaymentInstallment.order_id == order_id,
+        order_models.PaymentInstallment.month.in_(incoming_months),
+    ).delete(synchronize_session=False)
+    db.flush()
+
+    for inst in data.installments:
+        if inst.amount <= 0:
+            continue  # skip zero/negative entries
+        pi = order_models.PaymentInstallment(
+            order_id=order_id,
+            month=inst.month,
+            amount=round(inst.amount, 2),
+            notes=inst.notes,
+            collected_by_id=user.id,
+        )
+        db.add(pi)
+
+    # Calculate total collected and auto-update status
+    db.flush()
+    all_installments = (
+        db.query(order_models.PaymentInstallment)
+        .filter(order_models.PaymentInstallment.order_id == order_id)
+        .all()
+    )
+    total_collected = sum(p.amount for p in all_installments)
+    grand_total = sum(li.line_total or 0 for li in (db_order.line_items or []))
+
+    if total_collected >= grand_total and grand_total > 0:
+        db_order.status = order_models.OrderStatus.COLLECTED
+        db_order.collected_at = datetime.datetime.utcnow()
+        db_order.collected_by_id = user.id
+    else:
+        # If payments reduced below grand total, revert to CLOSED
+        if db_order.status == order_models.OrderStatus.COLLECTED:
+            db_order.status = order_models.OrderStatus.CLOSED
+            db_order.collected_at = None
+            db_order.collected_by_id = None
+
+    db.commit()
+
+    # Return updated list
+    installments = (
+        db.query(order_models.PaymentInstallment)
+        .filter(order_models.PaymentInstallment.order_id == order_id)
+        .order_by(order_models.PaymentInstallment.month)
+        .all()
+    )
+    return [
+        PaymentInstallmentResponse(
+            id=p.id, order_id=p.order_id, month=p.month, amount=p.amount, notes=p.notes,
+            collected_by_id=p.collected_by_id,
+            collected_by_name=p.collected_by.full_name if p.collected_by else None,
+            created_at=str(p.created_at),
+        )
+        for p in installments
+    ]
+
+
+@order_router.delete("/{order_id}/payments/{payment_id}")
+def delete_payment(
+    order_id: int,
+    payment_id: int,
+    db: Session = Depends(auth.get_db),
+    token: str = Depends(auth.oauth2_scheme),
+):
+    user = get_current_user(db, token)
+    if user.role not in (models.UserRole.COLLECTION_EXEC, models.UserRole.MANAGER):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    payment = (
+        db.query(order_models.PaymentInstallment)
+        .filter(
+            order_models.PaymentInstallment.id == payment_id,
+            order_models.PaymentInstallment.order_id == order_id,
+        )
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    db.delete(payment)
+    db.commit()
+    return {"message": "Payment deleted"}
 
 
 @order_router.delete("/{order_id}")

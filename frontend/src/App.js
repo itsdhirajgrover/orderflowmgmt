@@ -46,16 +46,16 @@ function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/orders/:orderId" element={<OrderDetailPage />} />
-              <Route path="/create-order" element={<CreateOrderPage />} />
-              <Route path="/customers" element={<CustomersPage />} />
-              <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
-              <Route path="/create-customer" element={<CreateCustomerPage />} />
-              <Route path="/skus" element={<SKUCatalogPage />} />
-              <Route path="/billing-queue" element={<BillingQueuePage />} />
-              <Route path="/dispatch-queue" element={<DispatchQueuePage />} />
-              <Route path="/collection-queue" element={<CollectionQueuePage />} />
-              <Route path="/users" element={<UsersPage />} />
-              <Route path="/create-user" element={<CreateUserPage />} />
+              <Route path="/create-order" element={<ProtectedRoute allowedRoles={['manager', 'sales_rep']}><CreateOrderPage /></ProtectedRoute>} />
+              <Route path="/customers" element={<ProtectedRoute allowedRoles={['manager', 'sales_rep']}><CustomersPage /></ProtectedRoute>} />
+              <Route path="/customers/:customerId" element={<ProtectedRoute allowedRoles={['manager', 'sales_rep']}><CustomerDetailPage /></ProtectedRoute>} />
+              <Route path="/create-customer" element={<ProtectedRoute allowedRoles={['manager']}><CreateCustomerPage /></ProtectedRoute>} />
+              <Route path="/skus" element={<ProtectedRoute allowedRoles={['manager', 'sales_rep', 'billing_exec']}><SKUCatalogPage /></ProtectedRoute>} />
+              <Route path="/billing-queue" element={<ProtectedRoute allowedRoles={['manager', 'billing_exec']}><BillingQueuePage /></ProtectedRoute>} />
+              <Route path="/dispatch-queue" element={<ProtectedRoute allowedRoles={['manager', 'dispatch_agent']}><DispatchQueuePage /></ProtectedRoute>} />
+              <Route path="/collection-queue" element={<ProtectedRoute allowedRoles={['manager', 'collection_exec']}><CollectionQueuePage /></ProtectedRoute>} />
+              <Route path="/users" element={<ProtectedRoute allowedRoles={['manager']}><UsersPage /></ProtectedRoute>} />
+              <Route path="/create-user" element={<ProtectedRoute allowedRoles={['manager']}><CreateUserPage /></ProtectedRoute>} />
             </Route>
           </Routes>
         </Router>

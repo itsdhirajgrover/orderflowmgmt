@@ -73,8 +73,31 @@ class Order(Base):
     created_by = relationship("User", foreign_keys=[created_by_id])
     assigned_to = relationship("User", foreign_keys=[assigned_to_id])
 
+    # Split order tracking
+    parent_order_id = Column(Integer, ForeignKey("orders.id"), nullable=True)
+    parent_order = relationship("Order", remote_side=[id], foreign_keys=[parent_order_id], backref="child_orders")
+    split_notes = Column(Text, nullable=True)
+
     # Line items relationship
     line_items = relationship("OrderLineItem", back_populates="order", cascade="all, delete-orphan")
+
+    # Payment installments
+    payment_installments = relationship("PaymentInstallment", back_populates="order", cascade="all, delete-orphan")
+
+
+class PaymentInstallment(Base):
+    __tablename__ = "payment_installments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
+    month = Column(String(7), nullable=False)  # "YYYY-MM" format
+    amount = Column(Float, default=0.0, nullable=False)
+    notes = Column(Text, nullable=True)
+    collected_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    collected_by = relationship("User", foreign_keys=[collected_by_id])
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    order = relationship("Order", back_populates="payment_installments")
 
 
 class OrderLineItem(Base):

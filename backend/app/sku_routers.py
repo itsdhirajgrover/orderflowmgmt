@@ -7,6 +7,14 @@ from pydantic import BaseModel
 sku_router = APIRouter(prefix="/skus", tags=["skus"])
 
 
+def get_current_user(db: Session, token: str):
+    payload = auth.jwt.decode(token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
+    user = db.query(models.User).filter(models.User.email == payload["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    return user
+
+
 def generate_sku_code(db: Session):
     last = db.query(sku_models.SKU).order_by(sku_models.SKU.id.desc()).first()
     next_num = (last.id + 1) if last else 1
@@ -72,6 +80,10 @@ def create_sku(
     db: Session = Depends(auth.get_db),
     token: str = Depends(auth.oauth2_scheme),
 ):
+    user = get_current_user(db, token)
+    if user.role != models.UserRole.MANAGER:
+        raise HTTPException(status_code=403, detail="Only managers can create SKUs")
+
     new_sku = sku_models.SKU(
         sku_code=generate_sku_code(db),
         name=sku.name,
@@ -145,6 +157,10 @@ def update_sku(
     db: Session = Depends(auth.get_db),
     token: str = Depends(auth.oauth2_scheme),
 ):
+    user = get_current_user(db, token)
+    if user.role != models.UserRole.MANAGER:
+        raise HTTPException(status_code=403, detail="Only managers can update SKUs")
+
     db_sku = db.query(sku_models.SKU).filter(sku_models.SKU.id == sku_id).first()
     if not db_sku:
         raise HTTPException(status_code=404, detail="SKU not found")
@@ -167,6 +183,10 @@ def delete_sku(
     db: Session = Depends(auth.get_db),
     token: str = Depends(auth.oauth2_scheme),
 ):
+    user = get_current_user(db, token)
+    if user.role != models.UserRole.MANAGER:
+        raise HTTPException(status_code=403, detail="Only managers can delete SKUs")
+
     db_sku = db.query(sku_models.SKU).filter(sku_models.SKU.id == sku_id).first()
     if not db_sku:
         raise HTTPException(status_code=404, detail="SKU not found")

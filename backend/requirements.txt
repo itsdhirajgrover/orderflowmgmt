@@ -1,9 +1,12 @@
 # Backend requirements
 fastapi
-uvicorn
+uvicorn[standard]
 sqlalchemy
 pymysql
+cryptography
 python-dotenv
 passlib[bcrypt]
-pyjwt
+python-jose[cryptography]
 requests
+gunicorn
+a2wsgi

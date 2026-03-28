@@ -48,8 +48,11 @@ import {
   Undo,
   Add,
   DeleteOutline,
+  CallSplit,
+  OpenInNew,
 } from "@mui/icons-material";
 import axios from "axios";
+import { useAuth } from "../context/AuthContext";
 
 const priorityOptions = [
   { value: "low", label: "Low" },
@@ -86,6 +89,8 @@ const InfoRow = ({ label, value }) => (
 
 const OrderDetailPage = () => {
   const { orderId } = useParams();
+  const { role } = useAuth();
+  const canEditOrders = ["manager", "sales_rep"].includes(role);
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -102,6 +107,9 @@ const OrderDetailPage = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
   const [actionLoading, setActionLoading] = useState(false);
   const [billingDialog, setBillingDialog] = useState(false);
+  const [splitDialog, setSplitDialog] = useState(false);
+  const [splitItems, setSplitItems] = useState([]);
+  const [splitNotes, setSplitNotes] = useState("");
   const [billingNotes, setBillingNotes] = useState("");
   const [dispatchDialog, setDispatchDialog] = useState(false);
   const [dispatchNotes, setDispatchNotes] = useState("");
@@ -241,6 +249,44 @@ const OrderDetailPage = () => {
   const handleCollect = () => performAction("collect", {}, "Payment collected!");
   const handleReverseCollection = () => performAction("reverse-collection", {}, "Payment collection reversed!");
 
+  const openSplitDialog = () => {
+    setSplitItems(
+      (order.line_items || []).map((li) => ({
+        line_item_id: li.id,
+        sku_name: li.sku_name,
+        sku_code: li.sku_code,
+        total_quantity: li.quantity,
+        ship_quantity: li.quantity,
+        unit: li.unit,
+      }))
+    );
+    setSplitNotes("");
+    setSplitDialog(true);
+  };
+
+  const handleSplit = async () => {
+    const itemsToSplit = splitItems.filter((si) => si.ship_quantity < si.total_quantity && si.ship_quantity >= 0);
+    if (itemsToSplit.length === 0) {
+      setSnackbar({ open: true, message: "Reduce ship quantity on at least one item to split", severity: "warning" });
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const token = localStorage.getItem("access_token");
+      await axios.post(`/api/orders/${orderId}/split`, {
+        line_items: itemsToSplit.map((si) => ({ line_item_id: si.line_item_id, ship_quantity: si.ship_quantity })),
+        split_notes: splitNotes || null,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      setSnackbar({ open: true, message: "Order split successfully! A new order has been created for the remaining items.", severity: "success" });
+      setSplitDialog(false);
+      fetchOrder();
+    } catch (err) {
+      setSnackbar({ open: true, message: err.response?.data?.detail || "Failed to split order", severity: "error" });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const getStatusChip = (status) => {
     const config = {
       pending_billing: { label: "Pending Billing", bg: "#fff3e0", color: "#e65100" },
@@ -286,9 +332,11 @@ const OrderDetailPage = () => {
   const actions = [];
   if (order.status === "pending_billing") {
     actions.push({ label: "Confirm Billing", icon: <Receipt />, color: "primary", onClick: () => setBillingDialog(true) });
+    actions.push({ label: "Split Order", icon: <CallSplit />, color: "warning", onClick: openSplitDialog });
   }
   if (order.status === "billed") {
     actions.push({ label: "Mark Ready for Dispatch", icon: <CheckCircle />, color: "secondary", onClick: handleMarkReadyDispatch });
+    actions.push({ label: "Split Order", icon: <CallSplit />, color: "warning", onClick: openSplitDialog });
   }
   if (order.status === "to_be_dispatched") {
     actions.push({ label: "Dispatch Order", icon: <LocalShipping />, color: "success", onClick: () => setDispatchDialog(true) });
@@ -325,7 +373,7 @@ const OrderDetailPage = () => {
             <Typography color="text.primary" sx={{ fontSize: 14, fontWeight: 600 }}>{order.order_number}</Typography>
           </Breadcrumbs>
         </Box>
-        {!editing && order.status === "pending_billing" ? (
+        {canEditOrders && !editing && order.status === "pending_billing" ? (
           <Button variant="contained" startIcon={<Edit />} onClick={() => setEditing(true)} sx={{ textTransform: "none", fontWeight: 600 }}>
             Edit Order
           </Button>
@@ -352,6 +400,33 @@ const OrderDetailPage = () => {
             <Typography variant="body2" color="text.secondary">
               {order.customer_name} ({order.customer_code}) · Created {new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" })}
             </Typography>
+            {order.parent_order_number && (
+              <Chip
+                icon={<CallSplit sx={{ fontSize: 14 }} />}
+                label={`Split from ${order.parent_order_number}`}
+                size="small"
+                color="info"
+                variant="outlined"
+                onClick={() => navigate(`/orders/${order.parent_order_id}`)}
+                sx={{ mt: 0.5, cursor: "pointer", fontWeight: 600, fontSize: 11 }}
+              />
+            )}
+            {order.child_orders && order.child_orders.length > 0 && (
+              <Box sx={{ mt: 0.5, display: "flex", gap: 0.5, flexWrap: "wrap" }}>
+                {order.child_orders.map((child) => (
+                  <Chip
+                    key={child.id}
+                    icon={<OpenInNew sx={{ fontSize: 12 }} />}
+                    label={`Split → ${child.order_number} (${statusLabels[child.status] || child.status})`}
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                    onClick={() => navigate(`/orders/${child.id}`)}
+                    sx={{ cursor: "pointer", fontWeight: 600, fontSize: 11 }}
+                  />
+                ))}
+              </Box>
+            )}
           </Box>
           <Paper variant="outlined" sx={{ px: 3, py: 1.5, textAlign: "center", borderRadius: 2, bgcolor: "#e3f2fd", borderColor: "#90caf9" }}>
             <Typography variant="caption" color="text.secondary">Grand Total</Typography>
@@ -636,10 +711,47 @@ const OrderDetailPage = () => {
                     {order.dispatch_notes && <InfoRow label="Dispatch Notes" value={order.dispatch_notes} />}
                     <InfoRow label="Closed / Delivered At" value={order.closed_at ? new Date(order.closed_at).toLocaleString("en-IN") : null} />
                     <InfoRow label="Payment Due Date" value={order.payment_due_date ? new Date(order.payment_due_date).toLocaleDateString("en-IN") : null} />
+                    <InfoRow label="Total Collected" value={
+                      <Typography component="span" sx={{ fontWeight: 700, color: (order.total_collected || 0) >= (order.grand_total || 0) ? "#2e7d32" : "#ed6c02" }}>
+                        ₹{(order.total_collected || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })} / ₹{(order.grand_total || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </Typography>
+                    } />
                     <InfoRow label="Payment Collected At" value={order.collected_at ? new Date(order.collected_at).toLocaleString("en-IN") : null} />
                     <InfoRow label="Collected By" value={order.collected_by_name} />
                   </Grid>
                 </Grid>
+                {/* Payment Installments Summary */}
+                {order.payment_installments && order.payment_installments.length > 0 && (
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Payment Installments</Typography>
+                    <TableContainer component={Paper} variant="outlined">
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: "#f5f7fa" }}>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }}>Month</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }} align="right">Amount</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }}>Notes</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }}>Collected By</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {order.payment_installments.map((p, idx) => (
+                            <TableRow key={idx} hover>
+                              <TableCell sx={{ fontWeight: 600, fontSize: 12 }}>
+                                {new Date(p.month + "-01").toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 700, fontSize: 12, color: "#2e7d32" }}>
+                                ₹{p.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: 12, color: "#666" }}>{p.notes || "—"}</TableCell>
+                              <TableCell sx={{ fontSize: 12 }}>{p.collected_by_name || "—"}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </Box>
+                )}
               </Box>
             </Paper>
           </Grid>
@@ -669,6 +781,77 @@ const OrderDetailPage = () => {
         <DialogActions>
           <Button onClick={() => setDispatchDialog(false)} sx={{ textTransform: "none" }}>Cancel</Button>
           <Button onClick={handleDispatch} variant="contained" color="success" sx={{ textTransform: "none" }} disabled={actionLoading}>Dispatch</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Split Order Dialog */}
+      <Dialog open={splitDialog} onClose={() => setSplitDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Split Order — {order.order_number}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Reduce the <strong>Ship Now</strong> quantity for items that are short. The remaining quantity will be moved to a new pending order.
+          </Typography>
+          <TableContainer component={Paper} variant="outlined" sx={{ mb: 2 }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: "#f5f7fa" }}>
+                  <TableCell sx={{ fontWeight: 700, fontSize: 12 }}>SKU</TableCell>
+                  <TableCell sx={{ fontWeight: 700, fontSize: 12 }}>ITEM</TableCell>
+                  <TableCell sx={{ fontWeight: 700, fontSize: 12 }} align="center">ORDERED</TableCell>
+                  <TableCell sx={{ fontWeight: 700, fontSize: 12 }} align="center">SHIP NOW</TableCell>
+                  <TableCell sx={{ fontWeight: 700, fontSize: 12 }} align="center">BACKORDER</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {splitItems.map((si, idx) => {
+                  const remainder = Math.max(0, si.total_quantity - si.ship_quantity);
+                  return (
+                    <TableRow key={si.line_item_id}>
+                      <TableCell><Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: 12 }}>{si.sku_code || "—"}</Typography></TableCell>
+                      <TableCell><Typography variant="body2" sx={{ fontWeight: 600, fontSize: 13 }}>{si.sku_name}</Typography></TableCell>
+                      <TableCell align="center"><Chip label={`${si.total_quantity} ${si.unit}`} size="small" variant="outlined" /></TableCell>
+                      <TableCell align="center">
+                        <TextField
+                          type="number"
+                          size="small"
+                          value={si.ship_quantity}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.min(si.total_quantity, parseFloat(e.target.value) || 0));
+                            setSplitItems((prev) => prev.map((item, i) => i === idx ? { ...item, ship_quantity: val } : item));
+                          }}
+                          inputProps={{ min: 0, max: si.total_quantity, step: 1 }}
+                          sx={{ width: 100 }}
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={`${remainder} ${si.unit}`}
+                          size="small"
+                          color={remainder > 0 ? "warning" : "default"}
+                          variant={remainder > 0 ? "filled" : "outlined"}
+                          sx={{ fontWeight: 600 }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <TextField fullWidth size="small" label="Split Notes (optional)" value={splitNotes} onChange={(e) => setSplitNotes(e.target.value)} multiline rows={2} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSplitDialog(false)} sx={{ textTransform: "none" }}>Cancel</Button>
+          <Button
+            onClick={handleSplit}
+            variant="contained"
+            color="warning"
+            startIcon={<CallSplit />}
+            sx={{ textTransform: "none", fontWeight: 600 }}
+            disabled={actionLoading || splitItems.every((si) => si.ship_quantity >= si.total_quantity)}
+          >
+            {actionLoading ? "Splitting..." : "Split Order"}
+          </Button>
         </DialogActions>
       </Dialog>
 

@@ -38,6 +38,7 @@ import {
   ArrowDownward,
 } from "@mui/icons-material";
 import axios from "axios";
+import { useAuth } from "../context/AuthContext";
 
 const statusOptions = [
   { value: "pending_billing", label: "Pending Billing" },
@@ -50,6 +51,8 @@ const statusOptions = [
 ];
 
 const OrdersPage = () => {
+  const { role } = useAuth();
+  const canManageOrders = ["manager", "sales_rep"].includes(role);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -178,12 +181,12 @@ const OrdersPage = () => {
             <Typography color="text.primary" sx={{ fontSize: 14, fontWeight: 600 }}>Orders</Typography>
           </Breadcrumbs>
         </Box>
-        <Button
+        {canManageOrders && <Button
           variant="contained" startIcon={<Add />} onClick={() => navigate("/create-order")}
           sx={{ textTransform: "none", fontWeight: 600, boxShadow: "0 2px 8px rgba(25,118,210,0.3)" }}
         >
           Create New Order
-        </Button>
+        </Button>}
       </Paper>
 
       {/* Main Content */}
@@ -307,11 +310,11 @@ const OrdersPage = () => {
                                 <Visibility fontSize="small" />
                               </IconButton>
                             </Tooltip>
-                            <Tooltip title="Delete">
+                            {canManageOrders && <Tooltip title="Delete">
                               <IconButton size="small" onClick={() => setDeleteDialog({ open: true, order })} sx={{ color: "#d32f2f" }}>
                                 <Delete fontSize="small" />
                               </IconButton>
-                            </Tooltip>
+                            </Tooltip>}
                           </Box>
                         </TableCell>
                       </TableRow>

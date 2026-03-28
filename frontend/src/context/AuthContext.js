@@ -55,10 +55,17 @@ export const AuthProvider = ({ children }) => {
     formData.append("password", password);
     const res = await axios.post("/api/token", formData);
     localStorage.setItem("access_token", res.data.access_token);
-    const payload = parseJwt(res.data.access_token);
-    // Fetch full user data
     const userRes = await axios.get("/api/users/me", {
       headers: { Authorization: `Bearer ${res.data.access_token}` },
+    });
+    setUser(userRes.data);
+    return userRes.data;
+  };
+
+  const loginWithOtp = async (token) => {
+    localStorage.setItem("access_token", token);
+    const userRes = await axios.get("/api/users/me", {
+      headers: { Authorization: `Bearer ${token}` },
     });
     setUser(userRes.data);
     return userRes.data;
@@ -83,6 +90,7 @@ export const AuthProvider = ({ children }) => {
         role: user?.role || null,
         token: localStorage.getItem("access_token"),
         login,
+        loginWithOtp,
         logout,
         getAuthHeader,
         refreshUser: fetchUser,

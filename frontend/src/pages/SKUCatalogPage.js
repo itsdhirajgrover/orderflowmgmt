@@ -9,10 +9,13 @@ import {
   ArrowBack, Search, Add, Refresh, Edit, Delete, Inventory, Save, Cancel,
 } from "@mui/icons-material";
 import axios from "axios";
+import { useAuth } from "../context/AuthContext";
 
 const statusColors = { active: "success", inactive: "default", discontinued: "error" };
 
 const SKUCatalogPage = () => {
+  const { role } = useAuth();
+  const canManageSKU = role === "manager";
   const [skus, setSkus] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -125,9 +128,9 @@ const SKUCatalogPage = () => {
             <Typography color="text.primary" sx={{ fontSize: 14, fontWeight: 600 }}>SKU Catalog</Typography>
           </Breadcrumbs>
         </Box>
-        <Button variant="contained" startIcon={<Add />} onClick={() => { setForm({ name: "", description: "", category: "", unit: "pcs", hsn_code: "", gst_rate: 18, base_price: 0 }); setAddDialog(true); }} sx={{ textTransform: "none", fontWeight: 600 }}>
+        {canManageSKU && <Button variant="contained" startIcon={<Add />} onClick={() => { setForm({ name: "", description: "", category: "", unit: "pcs", hsn_code: "", gst_rate: 18, base_price: 0 }); setAddDialog(true); }} sx={{ textTransform: "none", fontWeight: 600 }}>
           Add SKU
-        </Button>
+        </Button>}
       </Paper>
 
       <Box sx={{ maxWidth: 1300, mx: "auto", px: 3, py: 3 }}>
@@ -197,8 +200,10 @@ const SKUCatalogPage = () => {
                   <TableCell><Typography variant="body2" sx={{ fontFamily: "monospace" }}>₹{(s.base_price || 0).toLocaleString()}</Typography></TableCell>
                   <TableCell><Chip label={s.status.charAt(0).toUpperCase() + s.status.slice(1)} size="small" color={statusColors[s.status] || "default"} variant="outlined" sx={{ fontWeight: 600, fontSize: 11 }} /></TableCell>
                   <TableCell align="center">
-                    <IconButton size="small" onClick={() => openEdit(s)}><Edit fontSize="small" /></IconButton>
-                    <IconButton size="small" color="error" onClick={() => setDeleteDialog(s)}><Delete fontSize="small" /></IconButton>
+                    {canManageSKU && <>
+                      <IconButton size="small" onClick={() => openEdit(s)}><Edit fontSize="small" /></IconButton>
+                      <IconButton size="small" color="error" onClick={() => setDeleteDialog(s)}><Delete fontSize="small" /></IconButton>
+                    </>}
                   </TableCell>
                 </TableRow>
               ))}

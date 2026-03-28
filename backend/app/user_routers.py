@@ -185,8 +185,11 @@ def list_users(
     db: Session = Depends(auth.get_db),
     token: str = Depends(auth.oauth2_scheme),
 ):
-    """List all users. Accessible by managers; other roles get limited view."""
+    """List all users. Manager only."""
     user = get_current_user(db, token)
+    if user.role != models.UserRole.MANAGER:
+        raise HTTPException(status_code=403, detail="Only managers can view user list")
+
     users = db.query(models.User).options(
         joinedload(models.User.contacts),
         joinedload(models.User.addresses),

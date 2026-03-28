@@ -21,6 +21,16 @@ import {
   Avatar,
   Tooltip,
   TablePagination,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  MenuItem,
+  Grid,
+  Switch,
+  FormControlLabel,
+  Alert,
+  Snackbar,
 } from "@mui/material";
 import {
   ArrowBack,
@@ -29,8 +39,19 @@ import {
   Refresh,
   PersonOutline,
   FilterList,
+  Edit,
+  Visibility,
+  VisibilityOff,
 } from "@mui/icons-material";
 import axios from "axios";
+
+const roles = [
+  { value: "manager", label: "Manager" },
+  { value: "sales_rep", label: "Sales Representative" },
+  { value: "billing_exec", label: "Billing Executive" },
+  { value: "dispatch_agent", label: "Dispatch Agent" },
+  { value: "collection_exec", label: "Payment Collection Executive" },
+];
 
 const UsersPage = () => {
   const [users, setUsers] = useState([]);
@@ -40,6 +61,15 @@ const UsersPage = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const navigate = useNavigate();
+
+  // Edit dialog state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editUser, setEditUser] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -60,6 +90,69 @@ const UsersPage = () => {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  const handleEditOpen = (user) => {
+    setEditUser(user);
+    setEditForm({
+      first_name: user.first_name,
+      last_name: user.last_name,
+      email: user.email,
+      mobile: user.mobile,
+      role: user.role,
+      is_active: user.is_active,
+      password: "",
+    });
+    setEditError("");
+    setShowPassword(false);
+    setEditOpen(true);
+  };
+
+  const handleEditClose = () => {
+    setEditOpen(false);
+    setEditUser(null);
+    setEditForm({});
+    setEditError("");
+  };
+
+  const handleEditChange = (field) => (e) => {
+    setEditForm((prev) => ({ ...prev, [field]: e.target.value }));
+  };
+
+  const handleEditSave = async () => {
+    setEditLoading(true);
+    setEditError("");
+    try {
+      const token = localStorage.getItem("access_token");
+      const payload = {
+        first_name: editForm.first_name,
+        last_name: editForm.last_name,
+        email: editForm.email,
+        mobile: editForm.mobile,
+        role: editForm.role,
+        is_active: editForm.is_active,
+      };
+      if (editForm.password && editForm.password.trim()) {
+        payload.password = editForm.password.trim();
+      }
+      await axios.put(`/api/users/${editUser.id}`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setSnackbar({ open: true, message: "User updated successfully!", severity: "success" });
+      handleEditClose();
+      fetchUsers();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      if (typeof detail === "string") {
+        setEditError(detail);
+      } else if (Array.isArray(detail)) {
+        setEditError(detail.map((e) => e.msg || JSON.stringify(e)).join("; "));
+      } else {
+        setEditError("Failed to update user");
+      }
+    } finally {
+      setEditLoading(false);
+    }
+  };
 
   const getRoleColor = (role) => {
     const colors = {
@@ -265,6 +358,7 @@ const UsersPage = () => {
                       <TableCell sx={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "#666", py: 1.5 }}>Address</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "#666", py: 1.5 }}>Role</TableCell>
                       <TableCell sx={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "#666", py: 1.5 }}>Status</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "#666", py: 1.5 }} align="center">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -350,6 +444,17 @@ const UsersPage = () => {
                             }}
                           />
                         </TableCell>
+                        <TableCell align="center">
+                          <Tooltip title="Edit User">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => { e.stopPropagation(); handleEditOpen(user); }}
+                              sx={{ color: "#1976d2", border: "1px solid #e0e0e0", "&:hover": { bgcolor: "#e3f2fd" } }}
+                            >
+                              <Edit fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -372,6 +477,138 @@ const UsersPage = () => {
           )}
         </Paper>
       </Box>
+
+      {/* Edit User Dialog */}
+      <Dialog open={editOpen} onClose={handleEditClose} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, borderBottom: "1px solid #e0e0e0", pb: 1.5 }}>
+          Edit User
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2.5 }}>
+          {editError && (
+            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setEditError("")}>
+              {editError}
+            </Alert>
+          )}
+          <Grid container spacing={2} sx={{ mt: 0.5 }}>
+            <Grid item xs={6}>
+              <TextField
+                size="small"
+                fullWidth
+                label="First Name"
+                value={editForm.first_name || ""}
+                onChange={handleEditChange("first_name")}
+                required
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Last Name"
+                value={editForm.last_name || ""}
+                onChange={handleEditChange("last_name")}
+                required
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Email"
+                type="email"
+                value={editForm.email || ""}
+                onChange={handleEditChange("email")}
+                required
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Mobile"
+                value={editForm.mobile || ""}
+                onChange={handleEditChange("mobile")}
+                required
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={6}>
+              <TextField
+                size="small"
+                fullWidth
+                select
+                label="Role"
+                value={editForm.role || ""}
+                onChange={handleEditChange("role")}
+                InputLabelProps={{ shrink: true }}
+              >
+                {roles.map((r) => (
+                  <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={6}>
+              <TextField
+                size="small"
+                fullWidth
+                label="New Password"
+                type={showPassword ? "text" : "password"}
+                value={editForm.password || ""}
+                onChange={handleEditChange("password")}
+                placeholder="Leave blank to keep current"
+                InputLabelProps={{ shrink: true }}
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton size="small" onClick={() => setShowPassword(!showPassword)} edge="end">
+                        {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={editForm.is_active ?? true}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, is_active: e.target.checked }))}
+                    color="success"
+                  />
+                }
+                label={editForm.is_active ? "Active" : "Inactive"}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2, borderTop: "1px solid #e0e0e0" }}>
+          <Button onClick={handleEditClose} sx={{ textTransform: "none" }}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleEditSave}
+            disabled={editLoading || !editForm.first_name || !editForm.last_name || !editForm.email || !editForm.mobile}
+            sx={{ textTransform: "none", fontWeight: 600 }}
+          >
+            {editLoading ? <CircularProgress size={20} /> : "Save Changes"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Success Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

@@ -105,8 +105,14 @@ const CreateOrderPage = () => {
     finally { setSkuLoading(false); }
   }, []);
 
-  // Load SKU options on mount
-  useEffect(() => { fetchSkus(""); }, [fetchSkus]);
+  // Debounce SKU search – track latest query per line item
+  const [skuSearch, setSkuSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchSkus(skuSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [skuSearch, fetchSkus]);
 
   const updateLineItem = (index, field, value) => {
     setLineItems((prev) => prev.map((li, i) => (i === index ? { ...li, [field]: value } : li)));
@@ -354,7 +360,7 @@ const CreateOrderPage = () => {
                               filterOptions={(x) => x}
                               value={li.sku}
                               onChange={(_, v) => handleSkuSelect(idx, v)}
-                              onInputChange={(_, v) => { updateLineItem(idx, "skuSearch", v); fetchSkus(v); }}
+                              onInputChange={(_, v) => { updateLineItem(idx, "skuSearch", v); setSkuSearch(v); }}
                               loading={skuLoading}
                               isOptionEqualToValue={(o, v) => o.id === v.id}
                               size="small"
