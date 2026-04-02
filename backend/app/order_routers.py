@@ -1,10 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
-from . import auth, order_models, models, customer_models, database
+from . import auth, order_models, models, customer_models, database, otp_service
 from typing import List, Optional
 from pydantic import BaseModel
 import datetime
 import uuid
+import logging
+import os
+
+logger = logging.getLogger(__name__)
 
 order_router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -185,6 +189,45 @@ def get_current_user(db: Session, token: str):
     return user
 
 
+def notify_order_event(db, order, event: str):
+    customer = getattr(order, "customer", None)
+    if not customer:
+        logger.warning(f"Order event notification skipped: missing customer for order={order.id}")
+        return
+
+    channel = (customer.preferred_communication or os.getenv("DEFAULT_NOTIFICATION_CHANNEL", "sms")).strip().lower()
+    if channel not in ("sms", "whatsapp"):
+        channel = "sms"
+
+    message = otp_service.build_order_event_message(order, event)
+    sent = False
+    error = None
+    sent_at = None
+
+    try:
+        sent = otp_service.send_message(customer.phone_primary or customer.phone_secondary, message, channel)
+        sent_at = datetime.datetime.utcnow() if sent else None
+    except Exception as exc:
+        sent = False
+        error = str(exc)
+        logger.exception(f"Exception while sending order notification for order={order.id}, event={event}")
+
+    status_str = "sent" if sent else "failed"
+    notification_record = order_models.OrderNotification(
+        order_id=order.id,
+        customer_id=customer.id,
+        event=event,
+        channel=channel,
+        message=message,
+        status=status_str,
+        sent_at=sent_at,
+        error=error,
+    )
+
+    db.add(notification_record)
+    db.commit()
+
+
 # --- Endpoints ---
 
 @order_router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
@@ -233,6 +276,7 @@ def create_order(
 
     db.commit()
     db.refresh(new_order)
+    notify_order_event(db, new_order, "created")
     return order_to_response(new_order)
 
 
@@ -428,6 +472,7 @@ def confirm_billing(
 
     db.commit()
     db.refresh(db_order)
+    notify_order_event(db, db_order, "billed")
     return order_to_response(db_order)
 
 
@@ -455,6 +500,7 @@ def mark_ready_for_dispatch(
     db_order.status = order_models.OrderStatus.TO_BE_DISPATCHED
     db.commit()
     db.refresh(db_order)
+    notify_order_event(db, db_order, "ready_to_dispatch")
     return order_to_response(db_order)
 
 
@@ -490,6 +536,7 @@ def dispatch_order(
     db_order.dispatch_notes = data.dispatch_notes
     db.commit()
     db.refresh(db_order)
+    notify_order_event(db, db_order, "dispatched")
     return order_to_response(db_order)
 
 
@@ -646,6 +693,7 @@ def close_order(
 
     db.commit()
     db.refresh(db_order)
+    notify_order_event(db, db_order, "closed")
     return order_to_response(db_order)
 
 
@@ -670,11 +718,19 @@ def mark_collected(
     if db_order.status != order_models.OrderStatus.CLOSED:
         raise HTTPException(status_code=400, detail="Order must be closed/delivered first")
 
+    # Check if payments have been recorded
+    all_installments = db.query(order_models.PaymentInstallment).filter(order_models.PaymentInstallment.order_id == order_id).all()
+    total_collected = sum(p.amount for p in all_installments)
+    grand_total = sum(li.line_total or 0 for li in (db_order.line_items or []))
+    if total_collected < grand_total:
+        raise HTTPException(status_code=400, detail=f"Cannot mark as collected. Recorded payments: ₹{total_collected:.2f}, Grand total: ₹{grand_total:.2f}. Please record payments first.")
+
     db_order.status = order_models.OrderStatus.COLLECTED
     db_order.collected_at = datetime.datetime.utcnow()
     db_order.collected_by_id = user.id
     db.commit()
     db.refresh(db_order)
+    notify_order_event(db, db_order, "collected")
     return order_to_response(db_order)
 
 
@@ -811,6 +867,7 @@ def save_payments(
     total_collected = sum(p.amount for p in all_installments)
     grand_total = sum(li.line_total or 0 for li in (db_order.line_items or []))
 
+    status_before = db_order.status
     if total_collected >= grand_total and grand_total > 0:
         db_order.status = order_models.OrderStatus.COLLECTED
         db_order.collected_at = datetime.datetime.utcnow()
@@ -823,6 +880,11 @@ def save_payments(
             db_order.collected_by_id = None
 
     db.commit()
+
+    if status_before != db_order.status and db_order.status == order_models.OrderStatus.COLLECTED:
+        notify_order_event(db, db_order, "collected")
+    elif status_before == order_models.OrderStatus.COLLECTED and db_order.status == order_models.OrderStatus.CLOSED:
+        notify_order_event(db, db_order, "closed")
 
     # Return updated list
     installments = (

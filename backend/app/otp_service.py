@@ -107,3 +107,67 @@ def send_otp_sms(mobile: str, otp: str) -> bool:
     # except Exception as e:
     #     logger.error(f"Twilio SMS failed: {e}")
     #     return False
+
+
+def send_message(mobile: str, message: str, channel: str = None) -> bool:
+    """Send a generic notification message via SMS or WhatsApp.
+    In demo mode, message is logged/printed. For production, replace with provider API call.
+    """
+    if not mobile:
+        logger.warning("send_message called without mobile number")
+        return False
+
+    channel = (channel or os.getenv("DEFAULT_NOTIFICATION_CHANNEL", "sms")).strip().lower()
+    if channel not in ("sms", "whatsapp"):
+        channel = "sms"
+
+    # Demo mode behavior
+    logger.info(f"[DEMO {channel.upper()}] To {mobile}: {message}")
+    print(f"\n{'='*70}")
+    print(f"  📣 [{channel.upper()}] Send to {mobile}")
+    print(f"  Message: {message}")
+    print(f"{'='*70}\n")
+    return True
+
+    # Production providers can live here (Twilio, MSG91, etc.).
+
+
+def build_order_event_message(order, event: str) -> str:
+    order_number = getattr(order, "order_number", "UNKNOWN")
+    total = getattr(order, "grand_total", None)
+    customer_name = order.customer.name if getattr(order, "customer", None) else "Customer"
+
+    event_map = {
+        "created": f"Hello {customer_name}, your order {order_number} has been created successfully.",
+        "billed": f"Hello {customer_name}, your order {order_number} has been billed.",
+        "ready_to_dispatch": f"Hello {customer_name}, your order {order_number} is ready for dispatch.",
+        "dispatched": f"Hello {customer_name}, your order {order_number} has been dispatched.",
+        "closed": f"Hello {customer_name}, your order {order_number} is delivered and closed.",
+        "collected": f"Hello {customer_name}, payment for order {order_number} has been collected.",
+    }
+
+    message = event_map.get(event, f"Hello {customer_name}, status updated for order {order_number}.")
+    if total is not None:
+        message = f"{message} Total: {total:.2f}." if event in event_map else message
+    return message
+
+
+def send_order_event_notification(order, event: str) -> bool:
+    """Send event notification for the order to the customer via preferred channel."""
+    if not order or not getattr(order, "customer", None):
+        logger.warning("Order event notification skipped: missing order or customer")
+        return False
+
+    customer = order.customer
+    mobile = customer.phone_primary or customer.phone_secondary
+    if not mobile:
+        logger.warning(f"Order event notification skipped: no mobile for customer id={customer.id}")
+        return False
+
+    channel = (customer.preferred_communication or os.getenv("DEFAULT_NOTIFICATION_CHANNEL", "sms")).strip().lower()
+    if channel not in ("sms", "whatsapp"):
+        channel = "sms"
+
+    message = build_order_event_message(order, event)
+    return send_message(mobile, message, channel)
+

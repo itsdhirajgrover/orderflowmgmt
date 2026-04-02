@@ -84,6 +84,26 @@ class Order(Base):
     # Payment installments
     payment_installments = relationship("PaymentInstallment", back_populates="order", cascade="all, delete-orphan")
 
+    # Notification history
+    notifications = relationship("OrderNotification", back_populates="order", cascade="all, delete-orphan")
+
+
+class OrderNotification(Base):
+    __tablename__ = "order_notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    event = Column(String(80), nullable=False)
+    channel = Column(String(20), nullable=False, default="sms")
+    message = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, default="pending")  # pending, sent, failed
+    sent_at = Column(DateTime, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    order = relationship("Order", back_populates="notifications")
+
 
 class PaymentInstallment(Base):
     __tablename__ = "payment_installments"

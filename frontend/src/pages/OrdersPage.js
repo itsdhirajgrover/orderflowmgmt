@@ -45,7 +45,7 @@ const statusOptions = [
   { value: "billed", label: "Billed" },
   { value: "to_be_dispatched", label: "To Be Dispatched" },
   { value: "dispatched", label: "Dispatched" },
-  { value: "closed", label: "Closed" },
+  { value: "closed", label: "Delivery Complete" },
   { value: "collected", label: "Collected" },
   { value: "cancelled", label: "Cancelled" },
 ];
@@ -125,7 +125,7 @@ const OrdersPage = () => {
       billed: { label: "Billed", bg: "#e3f2fd", color: "#1565c0" },
       to_be_dispatched: { label: "To Be Dispatched", bg: "#ede7f6", color: "#4527a0" },
       dispatched: { label: "Dispatched", bg: "#e0f2f1", color: "#00695c" },
-      closed: { label: "Closed", bg: "#e8f5e9", color: "#2e7d32" },
+      closed: { label: "Delivery Complete", bg: "#e8f5e9", color: "#2e7d32" },
       collected: { label: "Collected", bg: "#f3e5f5", color: "#6a1b9a" },
       cancelled: { label: "Cancelled", bg: "#fbe9e7", color: "#c62828" },
     };
@@ -264,6 +264,7 @@ const OrdersPage = () => {
                       <TableCell sx={thSx} onClick={() => handleSort("grand_total")}>Grand Total <SortIcon field="grand_total" /></TableCell>
                       <TableCell sx={thSx}>Created By</TableCell>
                       <TableCell sx={thSx} onClick={() => handleSort("created_at")}>Created <SortIcon field="created_at" /></TableCell>
+                      <TableCell sx={thSx}>Collected At</TableCell>
                       <TableCell sx={{ ...thSx, cursor: "default" }}>Actions</TableCell>
                     </TableRow>
                   </TableHead>
@@ -301,6 +302,11 @@ const OrdersPage = () => {
                         <TableCell>
                           <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>
                             {new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" color="text.secondary" sx={{ fontSize: 11 }}>
+                            {order.status === "collected" && order.collected_at ? new Date(order.collected_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                           </Typography>
                         </TableCell>
                         <TableCell>

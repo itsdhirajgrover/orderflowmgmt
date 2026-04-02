@@ -198,6 +198,7 @@ const CollectionQueuePage = () => {
                     <TableCell sx={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", color: "#666" }}>Progress</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", color: "#666" }}>Payment Due</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", color: "#666" }}>Status</TableCell>
+                    {tab === 1 && <TableCell sx={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", color: "#666" }}>Payment Collected Date</TableCell>}
                     <TableCell sx={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase", color: "#666" }} align="right">Actions</TableCell>
                   </TableRow>
                 </TableHead>
@@ -261,6 +262,11 @@ const CollectionQueuePage = () => {
                           <Chip label="Pending" size="small" color="warning" variant="outlined" sx={{ fontSize: 11, height: 22 }} />
                         )}
                       </TableCell>
+                      {tab === 1 && (
+                        <TableCell>
+                          {order.collected_at ? new Date(order.collected_at).toLocaleDateString("en-IN") : "—"}
+                        </TableCell>
+                      )}
                       <TableCell align="right">
                         <Tooltip title="View Details">
                           <IconButton size="small" onClick={() => navigate(`/orders/${order.id}`)}>

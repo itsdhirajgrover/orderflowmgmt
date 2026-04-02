@@ -101,7 +101,7 @@ const DashboardPage = () => {
     billed: { label: "Billed", color: "#1976d2" },
     to_be_dispatched: { label: "To Be Dispatched", color: "#0288d1" },
     dispatched: { label: "Dispatched", color: "#2e7d32" },
-    closed: { label: "Delivered", color: "#7b1fa2" },
+    closed: { label: "Delivery Complete", color: "#7b1fa2" },
     collected: { label: "Collected", color: "#388e3c" },
     cancelled: { label: "Cancelled", color: "#9e9e9e" },
   };

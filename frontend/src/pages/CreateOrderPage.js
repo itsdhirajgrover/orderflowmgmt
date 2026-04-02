@@ -245,8 +245,10 @@ const CreateOrderPage = () => {
                 </Box>
                 <Box sx={{ p: 2.5 }}>
                   <Grid container spacing={2}>
-                    <Grid item xs={12} sm={8}>
+                    <Grid item xs={12}>
                       <Autocomplete
+                        fullWidth
+                        sx={{ width: '100%' }}
                         options={customerOptions}
                         getOptionLabel={(o) => `${o.customer_code} — ${o.name}`}
                         filterOptions={(x) => x}
@@ -255,10 +257,25 @@ const CreateOrderPage = () => {
                         onInputChange={(_, v) => setCustomerSearch(v)}
                         loading={customerLoading}
                         isOptionEqualToValue={(o, v) => o.id === v.id}
+                        renderOption={(props, option) => (
+                          <li {...props} style={{ whiteSpace: 'normal', maxWidth: '100%' }}>
+                            {`${option.customer_code} — ${option.name}`}
+                          </li>
+                        )}
                         renderInput={(params) => (
-                          <TextField {...params} {...fp} label="Customer *" placeholder="Search by name or code..."
+                          <TextField
+                            {...params}
+                            {...fp}
+                            label="Customer *"
+                            placeholder="Search by name or code..."
                             InputProps={{
                               ...params.InputProps,
+                              sx: {
+                                whiteSpace: 'normal',
+                                overflow: 'visible',
+                                textOverflow: 'clip',
+                                minWidth: '350px',
+                              },
                               endAdornment: (
                                 <>
                                   {customerLoading ? <CircularProgress color="inherit" size={18} /> : null}
@@ -266,12 +283,20 @@ const CreateOrderPage = () => {
                                 </>
                               ),
                             }}
+                            inputProps={{
+                              ...params.inputProps,
+                              style: {
+                                whiteSpace: 'normal',
+                                overflow: 'visible',
+                                textOverflow: 'clip',
+                              },
+                            }}
                           />
                         )}
                       />
                     </Grid>
-                    <Grid item xs={12} sm={4}>
-                      <TextField {...fp} select label="Priority" value={priority} onChange={(e) => setPriority(e.target.value)} required>
+                    <Grid item xs={12}>
+                      <TextField {...fp} select label="Priority" value={priority} onChange={(e) => setPriority(e.target.value)} required fullWidth>
                         {priorities.map((p) => <MenuItem key={p.value} value={p.value}>{p.label}</MenuItem>)}
                       </TextField>
                     </Grid>

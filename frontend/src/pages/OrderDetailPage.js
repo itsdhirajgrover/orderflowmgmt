@@ -246,7 +246,7 @@ const OrderDetailPage = () => {
     setDispatchNotes("");
   };
   const handleClose = () => performAction("close", {}, "Order closed / delivered!");
-  const handleCollect = () => performAction("collect", {}, "Payment collected!");
+  const handleCollect = () => navigate("/collection-queue");
   const handleReverseCollection = () => performAction("reverse-collection", {}, "Payment collection reversed!");
 
   const openSplitDialog = () => {
@@ -293,7 +293,7 @@ const OrderDetailPage = () => {
       billed: { label: "Billed", bg: "#e3f2fd", color: "#1565c0" },
       to_be_dispatched: { label: "To Be Dispatched", bg: "#ede7f6", color: "#4527a0" },
       dispatched: { label: "Dispatched", bg: "#e0f2f1", color: "#00695c" },
-      closed: { label: "Closed", bg: "#e8f5e9", color: "#2e7d32" },
+      closed: { label: "Delivery Complete", bg: "#e8f5e9", color: "#2e7d32" },
       collected: { label: "Collected", bg: "#f3e5f5", color: "#6a1b9a" },
       cancelled: { label: "Cancelled", bg: "#fbe9e7", color: "#c62828" },
     };
@@ -345,7 +345,7 @@ const OrderDetailPage = () => {
     actions.push({ label: "Close / Confirm Delivery", icon: <CheckCircle />, color: "success", onClick: handleClose });
   }
   if (order.status === "closed") {
-    actions.push({ label: "Mark Payment Collected", icon: <AccountBalance />, color: "primary", onClick: handleCollect });
+    actions.push({ label: "Record Payment Collection", icon: <AccountBalance />, color: "primary", onClick: handleCollect });
   }
   if (order.status === "collected") {
     actions.push({ label: "Reverse Payment Collection", icon: <Undo />, color: "warning", onClick: handleReverseCollection });

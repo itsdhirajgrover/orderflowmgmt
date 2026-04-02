@@ -10,16 +10,10 @@ Replace <your_secret> with a strong random secret key.
 import sys
 import os
 
-# === CHANGE THESE ===
-USERNAME = "your_pythonanywhere_username"  # <-- Replace this
-MYSQL_PASSWORD = "your_mysql_password"     # <-- Replace this
-JWT_SECRET = "change_this_to_a_random_secret_key"  # <-- Replace this
-# ====================
-
 # Project path
-PROJECT_DIR = f"/home/{USERNAME}/OrderFlowMgmt"
-BACKEND_DIR = f"{PROJECT_DIR}/backend"
-VENV_DIR = f"/home/{USERNAME}/.virtualenvs/orderflow/lib/python3.10/site-packages"
+PROJECT_DIR = os.getenv("PROJECT_DIR", "/home/<username>/OrderFlowMgmt")
+BACKEND_DIR = os.getenv("BACKEND_DIR", f"{PROJECT_DIR}/backend")
+VENV_DIR = os.getenv("VENV_DIR", "/home/<username>/.virtualenvs/orderflow/lib/python3.10/site-packages")
 
 # Add paths
 if PROJECT_DIR not in sys.path:
@@ -29,12 +23,12 @@ if BACKEND_DIR not in sys.path:
 if os.path.exists(VENV_DIR):
     sys.path.insert(0, VENV_DIR)
 
-# Set environment variables BEFORE importing the app
-os.environ["DATABASE_URL"] = (
-    f"mysql+pymysql://{USERNAME}:{MYSQL_PASSWORD}"
-    f"@{USERNAME}.mysql.pythonanywhere-services.com/{USERNAME}$ordermgmt"
-)
-os.environ["JWT_SECRET"] = JWT_SECRET
+# Optionally set final environment variables if missing
+if "DATABASE_URL" not in os.environ:
+    os.environ["DATABASE_URL"] = os.getenv("PA_DATABASE_URL", "mysql+pymysql://<username>:<password>@<username>.mysql.pythonanywhere-services.com/<username>$ordermgmt")
+
+if "JWT_SECRET" not in os.environ:
+    os.environ["JWT_SECRET"] = os.getenv("PA_JWT_SECRET", "change_this_to_a_random_secret_key")
 
 # Import FastAPI app and wrap with WSGI adapter
 from a2wsgi import ASGIMiddleware
